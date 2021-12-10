@@ -1,0 +1,85 @@
+Resources:
+
+  PublicLoadBalancerFargate:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - SecurityGroupPublicLoadBalancerFargate
+    Properties:
+      Type: application # application | network
+      Scheme: internet-facing # internal | internet-facing
+      IpAddressType: ipv4 # ipv4 | dualstack
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: false
+        - Key: idle_timeout.timeout_seconds
+          Value: '30'
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: false
+        - Key: routing.http2.enabled
+          Value: true
+      Subnets:
+        - ${self:custom.environment.SUBNET_ONE_ID}
+        - ${self:custom.environment.SUBNET_TWO_ID}
+      SecurityGroups:
+        - Ref: SecurityGroupPublicLoadBalancerFargate
+      Tags:
+        - Key: Name
+          Value: ${self:provider.stage}-alb-${self:custom.environment.STACK_NAME_PREFIX}${self:service}
+        - Key: Namespace
+          Value: ${self:custom.namespace}
+        - Key: Stage
+          Value: ${self:provider.stage}
+
+  ListenerHTTPFargate:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - PublicLoadBalancerFargate
+    Properties:
+      Port: 80
+      Protocol: HTTP # HTTP | HTTPS | TCP | TCP_UDP | TLS | UDP
+      DefaultActions:
+        - Type: redirect # authenticate-cognito | authenticate-oidc | fixed-response | forward | redirect
+          RedirectConfig:
+            Host: "#{host}"
+            Path: "/#{path}"
+            Query: "#{query}"
+            Port: 443
+            Protocol: HTTPS # HTTP | HTTPS | #{protocol}
+            StatusCode: HTTP_301 # HTTP_301 | HTTP_302
+      LoadBalancerArn:
+        Ref: PublicLoadBalancerFargate
+
+  ListenerHTTPSFargate:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - PublicLoadBalancerFargate
+    Properties:
+      Port: 443
+      Protocol: HTTPS # HTTP | HTTPS | TCP | TCP_UDP | TLS | UDP
+      DefaultActions:
+        - Type: forward # authenticate-cognito | authenticate-oidc | fixed-response | forward | redirect
+          TargetGroupArn:
+            Ref: TargetGroupFargateDrop
+      LoadBalancerArn:
+        Ref: PublicLoadBalancerFargate
+      Certificates:
+        - CertificateArn: ${self:custom.environment.CERTIFICATE_ARN}
+
+  TargetGroupFargateDrop:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: ${self:provider.stage}-${self:custom.environment.STACK_NAME_PREFIX}${self:service}-drop
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: ${self:custom.environment.VPC_ID}
+      Tags:
+        - Key: Namespace
+          Value: ${self:custom.namespace}
+        - Key: Stage
+          Value: ${self:provider.stage}

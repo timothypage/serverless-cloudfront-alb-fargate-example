@@ -1,0 +1,52 @@
+Resources:
+
+  SecurityGroupPublicLoadBalancerFargate:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the public facing load balancer
+      VpcId: ${self:custom.environment.VPC_ID}
+      SecurityGroupIngress:
+        # Allow access to ALB from anywhere on the internet
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: -1
+      Tags:
+        - Key: Namespace
+          Value: ${self:custom.namespace}
+        - Key: Stage
+          Value: ${self:provider.stage}
+
+  FargateContainerSecurityGroupWithIngresses:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the Fargate containers
+      VpcId: ${self:custom.environment.VPC_ID}
+      Tags:
+        - Key: Namespace
+          Value: ${self:custom.namespace}
+        - Key: Stage
+          Value: ${self:provider.stage}
+
+  SecurityGroupIngressFromPublicALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn:
+      - FargateContainerSecurityGroupWithIngresses
+      - SecurityGroupPublicLoadBalancerFargate
+    Properties:
+      Description: Ingress from the shared public ALB
+      GroupId:
+        Ref: FargateContainerSecurityGroupWithIngresses
+      IpProtocol: -1
+      SourceSecurityGroupId:
+        Ref: SecurityGroupPublicLoadBalancerFargate
+
+  SecurityGroupIngressFromSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn:
+      - FargateContainerSecurityGroupWithIngresses
+    Properties:
+      Description: Ingress from other containers in the same security group
+      GroupId:
+        Ref: FargateContainerSecurityGroupWithIngresses
+      IpProtocol: -1
+      SourceSecurityGroupId:
+        Ref: FargateContainerSecurityGroupWithIngresses  

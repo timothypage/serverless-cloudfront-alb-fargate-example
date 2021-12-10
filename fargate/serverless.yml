@@ -1,0 +1,29 @@
+service: fargate
+
+projectDir: ../
+
+provider:
+  name: aws
+  # runtime: nodejs14.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-2'}
+  profile: ${self:provider.stage}
+  stackName: ${self:custom.environment.STACK_NAME_PREFIX}${self:provider.stage}-${self:service}
+
+package:
+  exclude:
+    - .git/**
+    - node_modules/**
+
+custom:
+  environment: ${file(../environment.yml):${self:provider.stage}}
+  namespace: tz
+
+resources:
+  - ${file(./resources-sg.yml)}
+  - ${file(./resources-iam.yml)}
+  - ${file(./resources-alb.yml)}
+  - ${file(./resources-ecs.yml)}
+  - ${file(./resources-cloudfront.yml)}
+  - ${file(./resources-application-blue.yml)}
+  - ${file(./resources-application-green.yml)}

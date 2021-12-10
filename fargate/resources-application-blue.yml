@@ -1,0 +1,135 @@
+Resources: 
+
+  RecordSetGroupFargateBlue:
+    Type: AWS::Route53::RecordSetGroup
+    DependsOn:
+      - DistributionFargate
+    Properties:
+      HostedZoneId: ${self:custom.environment.HOSTED_ZONE_ID_DOMAIN}
+      RecordSets:
+        - Name: ${self:service}-blue.${self:custom.environment.DOMAIN}.
+          Type: A
+          AliasTarget:
+            HostedZoneId: Z2FDTNDATAQYW2 # always this if you're pointed at cloudfront, see resources-application.yml for an ALB example
+            DNSName:
+              Fn::GetAtt: [ DistributionFargate, DomainName ]
+
+  TargetGroupFargateBlueService:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: ${self:provider.stage}-${self:service}-blue
+      TargetType: ip
+      HealthCheckIntervalSeconds: ${self:custom.environment.APPLICATION_HEALTHCECK_GRACE_PERIOD}
+      HealthCheckPath: /
+      HealthCheckPort: ${self:custom.environment.APPLICATION_PORT}
+      HealthCheckProtocol: HTTP # HTTP | HTTPS | TCP | TCP_UDP | TLS | UDP
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200-302
+      Port: 80
+      Protocol: HTTP # HTTP | HTTPS | TCP | TCP_UDP | TLS | UDP
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+        - Key: stickiness.enabled
+          Value: true
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: 86400
+        - Key: load_balancing.algorithm.type
+          Value: round_robin
+      VpcId: ${self:custom.environment.VPC_ID}
+
+  ListenerRuleHTTPFargateBlue:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - TargetGroupArn:
+            Ref: TargetGroupFargateBlueService
+          Type: 'forward'
+      Conditions:
+        - Field: host-header
+          Values:
+            - ${self:service}-blue.${self:custom.environment.DOMAIN}
+      ListenerArn:
+        Ref: ListenerHTTPSFargate
+      Priority: 100
+
+  # A log group for storing the container logs for this service.
+  LogGroupFargateBlueService:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: ${self:provider.stage}-${self:service}-blue
+
+  TaskDefinitionFargateBlueService:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+      - ECSRole
+      - TaskRole
+      - LogGroupFargateBlueService
+    Properties:
+      Family: ${self:provider.stage}-${self:service}-blue
+      Cpu: ${self:custom.environment.APPLICATION_CPU}
+      Memory: ${self:custom.environment.APPLICATION_MEMORY}
+      NetworkMode: awsvpc # none | bridge | awsvpc | host
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn:
+        Fn::GetAtt: [TaskRole, Arn]
+      TaskRoleArn:
+        Fn::GetAtt: [TaskRole, Arn]
+      ContainerDefinitions:
+        - Name: ${self:provider.stage}-${self:service}-blue
+          Cpu: ${self:custom.environment.APPLICATION_CPU}
+          Memory: ${self:custom.environment.APPLICATION_MEMORY}
+          Image: ${self:custom.environment.APPLICATION_IMAGE}
+          Environment:
+            - Name: REGION
+              Value: ${self:provider.region}
+            - Name: COLOR
+              Value: steelblue
+            - Name: ENV_NAME
+              Value: ${self:provider.stage}
+          PortMappings:
+            - ContainerPort: ${self:custom.environment.APPLICATION_PORT}
+          LogConfiguration:
+            LogDriver: "awslogs"
+            Options:
+              awslogs-group: ${self:provider.stage}-${self:service}-blue
+              awslogs-region: ${self:provider.region}
+              awslogs-stream-prefix: ${self:service}
+
+  ServiceFargateBlueService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ListenerRuleHTTPFargateBlue
+      - TargetGroupFargateBlueService
+    Properties:
+      ServiceName: ${self:provider.stage}-${self:service}-blue
+      Cluster:
+        Ref: ECSCluster
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 75
+      DesiredCount: 1
+      HealthCheckGracePeriodSeconds: ${self:custom.environment.APPLICATION_HEALTHCECK_GRACE_PERIOD}
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Ref: FargateContainerSecurityGroupWithIngresses
+          Subnets:
+            - ${self:custom.environment.SUBNET_ONE_ID}
+            - ${self:custom.environment.SUBNET_TWO_ID}
+      TaskDefinition:
+        Ref: TaskDefinitionFargateBlueService
+      LoadBalancers:
+        - ContainerName: ${self:provider.stage}-${self:service}-blue
+          ContainerPort: ${self:custom.environment.APPLICATION_PORT}
+          TargetGroupArn:
+            Ref: TargetGroupFargateBlueService
+      PlatformVersion: "1.4.0"

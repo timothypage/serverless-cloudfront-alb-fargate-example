@@ -1,0 +1,74 @@
+Resources:
+
+  CachePolicyFargate:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        DefaultTTL: ${self:custom.environment.CACHE_POLICY_DEFAULT_TTL}
+        MaxTTL: ${self:custom.environment.CACHE_POLICY_MAX_TTL}
+        MinTTL: ${self:custom.environment.CACHE_POLICY_MIN_TTL}
+        Name: ${self:provider.stage}-${self:service}-cache-policy
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none # all | allExcept | none | whitelist
+          EnableAcceptEncodingGzip: false
+          HeadersConfig:
+            HeaderBehavior: whitelist # none | whitelist
+            Headers:
+              - Host
+              - Authorization
+          QueryStringsConfig:
+            QueryStringBehavior: all # all | allExcept | none | whitelist
+
+  DistributionFargate:
+    Type: AWS::CloudFront::Distribution
+    DependsOn:
+      - CachePolicyFargate
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - ${self:service}-blue.${self:custom.environment.DOMAIN}
+          - ${self:service}-green.${self:custom.environment.DOMAIN}
+        Comment: Distribution for Fargate
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        DefaultCacheBehavior:
+          AllowedMethods: [HEAD, DELETE, POST, GET, OPTIONS, PUT, PATCH]
+          CachedMethods: [HEAD, GET]
+          CachePolicyId:
+            Ref: CachePolicyFargate
+          Compress: true
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03 # This is the default SecurityHeaders https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-response-headers-policies.html
+          SmoothStreaming: false
+          TargetOriginId: ApplicationOriginFor-${self:provider.stage}-${self:service}
+          ViewerProtocolPolicy: redirect-to-https
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        # Logging:
+        #   Bucket: ${self:custom.environment.LOGGING_BUCKET_NAME}.s3.amazonaws.com
+        #   IncludeCookies: false
+        #   Prefix: cf-${self:custom.environment.HOSTNAME_PORTAL}/
+        Origins:
+          - DomainName:
+              Fn::GetAtt: [ PublicLoadBalancerFargate, DNSName ]
+            Id: ApplicationOriginFor-${self:provider.stage}-${self:service}
+            OriginPath: ""
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+        PriceClass: PriceClass_100
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+        ViewerCertificate:
+          MinimumProtocolVersion: TLSv1.2_2021
+          AcmCertificateArn: ${self:custom.environment.CERTIFICATE_ARN_FOR_CLOUDFRONT}
+          SslSupportMethod: sni-only
+        WebACLId: ""
+      Tags:
+        - Key: Stage
+          Value: ${self:provider.stage}
+        - Key: Namespace
+          Value: ${self:custom.namespace}
